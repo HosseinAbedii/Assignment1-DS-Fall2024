@@ -2,6 +2,7 @@
 import socket
 import json
 import sys
+import os
 from typing import Dict, List
 
 class DataClient:
@@ -10,6 +11,28 @@ class DataClient:
         self.port = port
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.data: List[Dict] = []
+        self.client_id = None
+        self.load_client_id()
+        
+    def load_client_id(self):
+        """بارگذاری شناسه کلاینت از فایل"""
+        try:
+            if os.path.exists('client_id.txt'):
+                with open('client_id.txt', 'r') as f:
+                    self.client_id = f.read().strip()
+                print(f"Loaded stored client ID: {self.client_id}")
+        except Exception as e:
+            print(f"Error loading client ID: {e}")
+
+    def save_client_id(self, client_id: str):
+        """ذخیره شناسه کلاینت در فایل"""
+        try:
+            with open('client_id.txt', 'w') as f:
+                f.write(client_id)
+            self.client_id = client_id
+            print(f"Saved client ID: {client_id}")
+        except Exception as e:
+            print(f"Error saving client ID: {e}")
         
     def connect(self):
         """اتصال به سرور"""
@@ -43,12 +66,14 @@ class DataClient:
             response = json.loads(self.receive_all())
             if response['type'] == 'data_response':
                 self.data = response['data']
+                if 'client_id' in response and response['client_id'] != self.client_id:
+                    self.save_client_id(response['client_id'])
+                
                 print("\nReceived data:")
                 if not self.data:
                     print("No data available")
                 else:
                     for record in self.data:
-                        # نمایش تمام فیلدهای موجود در رکورد
                         print("\nRecord:")
                         for key, value in record.items():
                             print(f"{key}: {value}")
@@ -66,6 +91,9 @@ class DataClient:
             
             response = json.loads(self.receive_all())
             if response['type'] == 'id_locations_response':
+                if 'client_id' in response and response['client_id'] != self.client_id:
+                    self.save_client_id(response['client_id'])
+                    
                 print("\nRecord Locations:")
                 if not response['data']:
                     print("No records currently allocated")
@@ -93,6 +121,7 @@ class DataClient:
             print("1. Request data")
             print("2. Show record locations")
             print("3. Disconnect")
+            print(f"Current Client ID: {self.client_id or 'Not yet assigned'}")
             
             try:
                 choice = input("Enter choice (1-3): ")

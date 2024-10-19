@@ -4,6 +4,10 @@ import threading
 import json
 import random
 import csv
+import logging
+import uuid
+import os
+from datetime import datetime
 from typing import Dict, List, Set
 
 class DataDistributionServer:
@@ -15,18 +19,64 @@ class DataDistributionServer:
         self.client_data: Dict[str, List[Dict]] = {}  # client_id -> data records
         self.available_data: List[Dict] = []
         self.lock = threading.Lock()
+        self.client_ids: Dict[str, str] = {}  # addr -> client_uuid
         
+        # تنظیم سیستم لاگینگ
+        self.setup_logging()
+        
+    def setup_logging(self):
+        """راه‌اندازی سیستم لاگینگ"""
+        if not os.path.exists('logs'):
+            os.makedirs('logs')
+            
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(levelname)s - %(message)s',
+            handlers=[
+                logging.FileHandler(f'logs/server_{datetime.now().strftime("%Y%m%d")}.log'),
+                logging.StreamHandler()
+            ]
+        )
+        self.logger = logging.getLogger(__name__)
+
+    def load_client_ids(self):
+        """بارگذاری شناسه‌های ذخیره شده کلاینت‌ها"""
+        try:
+            if os.path.exists('client_ids.json'):
+                with open('client_ids.json', 'r') as f:
+                    self.client_ids = json.load(f)
+                self.logger.info(f"Loaded {len(self.client_ids)} stored client IDs")
+        except Exception as e:
+            self.logger.error(f"Error loading client IDs: {e}")
+
+    def save_client_ids(self):
+        """ذخیره شناسه‌های کلاینت‌ها"""
+        try:
+            with open('client_ids.json', 'w') as f:
+                json.dump(self.client_ids, f)
+            self.logger.info("Saved client IDs to file")
+        except Exception as e:
+            self.logger.error(f"Error saving client IDs: {e}")
+
+    def get_client_id(self, addr: str) -> str:
+        """دریافت یا ایجاد شناسه یکتا برای کلاینت"""
+        if addr not in self.client_ids:
+            self.client_ids[addr] = str(uuid.uuid4())
+            self.save_client_ids()
+            self.logger.info(f"Generated new client ID for {addr}: {self.client_ids[addr]}")
+        return self.client_ids[addr]
+
     def load_data(self, filename: str):
         """بارگذاری داده از فایل CSV"""
         try:
             with open(filename, 'r', encoding='utf-8') as file:
                 csv_reader = csv.DictReader(file)
                 self.available_data = list(csv_reader)
-                print(f"Loaded {len(self.available_data)} records from {filename}")
+                self.logger.info(f"Loaded {len(self.available_data)} records from {filename}")
                 if self.available_data:
-                    print("Available columns:", list(self.available_data[0].keys()))
+                    self.logger.info(f"Available columns: {list(self.available_data[0].keys())}")
         except Exception as e:
-            print(f"Error loading data: {e}")
+            self.logger.error(f"Error loading data: {e}")
             self.available_data = []
 
     def send_data(self, client_socket: socket.socket, data: dict):
@@ -41,7 +91,7 @@ class DataDistributionServer:
                     raise RuntimeError("socket connection broken")
                 total_sent += sent
         except Exception as e:
-            print(f"Error sending data: {e}")
+            self.logger.error(f"Error sending data: {e}")
             
     def distribute_data(self, client_id: str) -> List[Dict]:
         """توزیع داده‌های موجود به کلاینت"""
@@ -57,6 +107,7 @@ class DataDistributionServer:
                 self.available_data.pop(i)
                 
             self.client_data[client_id] = selected_data
+            self.logger.info(f"Distributed {len(selected_data)} records to client {client_id}")
             return selected_data
             
     def redistribute_data(self, disconnected_client_id: str):
@@ -65,7 +116,7 @@ class DataDistributionServer:
             if disconnected_client_id not in self.client_data:
                 return
                 
-            print(f"Redistributing data from {disconnected_client_id}")
+            self.logger.info(f"Redistributing data from {disconnected_client_id}")
             self.available_data.extend(self.client_data[disconnected_client_id])
             del self.client_data[disconnected_client_id]
             
@@ -79,9 +130,10 @@ class DataDistributionServer:
                         }
                         self.send_data(self.clients[client_id], response)
                         
-    def handle_client(self, client_socket: socket.socket, client_id: str):
+    def handle_client(self, client_socket: socket.socket, addr: str):
         """مدیریت اتصال کلاینت"""
-        print(f"New client connected: {client_id}")
+        client_id = self.get_client_id(str(addr))
+        self.logger.info(f"Client connected - Address: {addr}, ID: {client_id}")
         
         try:
             while True:
@@ -90,32 +142,34 @@ class DataDistributionServer:
                     break
                     
                 request = json.loads(data)
+                self.logger.debug(f"Received request from {client_id}: {request['type']}")
                 
                 if request['type'] == 'get_data':
                     client_data = self.distribute_data(client_id)
                     response = {
                         'type': 'data_response',
-                        'data': client_data
+                        'data': client_data,
+                        'client_id': client_id
                     }
                     self.send_data(client_socket, response)
                     
                 elif request['type'] == 'get_id_locations':
                     id_locations = {}
-                    # استفاده از اولین ستون به عنوان شناسه
                     for cid, data_list in self.client_data.items():
                         for record in data_list:
                             first_key = next(iter(record))
                             id_locations[record[first_key]] = cid
                     response = {
                         'type': 'id_locations_response',
-                        'data': id_locations
+                        'data': id_locations,
+                        'client_id': client_id
                     }
                     self.send_data(client_socket, response)
                     
         except Exception as e:
-            print(f"Error handling client {client_id}: {e}")
+            self.logger.error(f"Error handling client {client_id}: {e}")
         finally:
-            print(f"Client disconnected: {client_id}")
+            self.logger.info(f"Client disconnected: {client_id}")
             with self.lock:
                 if client_id in self.clients:
                     del self.clients[client_id]
@@ -123,22 +177,23 @@ class DataDistributionServer:
                     
     def start(self):
         """راه‌اندازی سرور"""
+        self.load_client_ids()
         self.server_socket.bind((self.host, self.port))
         self.server_socket.listen(5)
-        print(f"Server listening on {self.host}:{self.port}")
+        self.logger.info(f"Server listening on {self.host}:{self.port}")
         
         try:
             while True:
                 client_socket, addr = self.server_socket.accept()
-                client_id = f"client_{len(self.clients) + 1}"
+                client_id = self.get_client_id(str(addr))
                 self.clients[client_id] = client_socket
                 
                 thread = threading.Thread(target=self.handle_client, 
-                                       args=(client_socket, client_id))
+                                       args=(client_socket, addr))
                 thread.daemon = True
                 thread.start()
         except KeyboardInterrupt:
-            print("Server shutting down...")
+            self.logger.info("Server shutting down...")
         finally:
             self.server_socket.close()
 
