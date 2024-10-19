@@ -1,3 +1,4 @@
+# client-code.py
 import socket
 import json
 import sys
@@ -11,7 +12,7 @@ class DataClient:
         self.data: List[Dict] = []
         
     def connect(self):
-        """Connect to server"""
+        """اتصال به سرور"""
         try:
             self.socket.connect((self.host, self.port))
             print("Connected to server")
@@ -19,16 +20,27 @@ class DataClient:
         except Exception as e:
             print(f"Connection failed: {e}")
             return False
+
+    def receive_all(self):
+        """دریافت کامل داده از سرور"""
+        BUFF_SIZE = 4096
+        data = b''
+        while True:
+            part = self.socket.recv(BUFF_SIZE)
+            data += part
+            if len(part) < BUFF_SIZE:
+                break
+        return data.decode()
             
     def request_data(self):
-        """Request data allocation from server"""
+        """درخواست داده از سرور"""
         try:
             request = {
                 'type': 'get_data'
             }
             self.socket.send(json.dumps(request).encode())
             
-            response = json.loads(self.socket.recv(4096).decode())
+            response = json.loads(self.receive_all())
             if response['type'] == 'data_response':
                 self.data = response['data']
                 print("\nReceived data:")
@@ -42,14 +54,14 @@ class DataClient:
             print(f"Error requesting data: {e}")
             
     def request_id_locations(self):
-        """Request locations of all IDs"""
+        """درخواست موقعیت شناسه‌ها"""
         try:
             request = {
                 'type': 'get_id_locations'
             }
             self.socket.send(json.dumps(request).encode())
             
-            response = json.loads(self.socket.recv(4096).decode())
+            response = json.loads(self.receive_all())
             if response['type'] == 'id_locations_response':
                 print("\nID Locations:")
                 if not response['data']:
@@ -61,7 +73,7 @@ class DataClient:
             print(f"Error requesting ID locations: {e}")
             
     def disconnect(self):
-        """Disconnect from server"""
+        """قطع اتصال از سرور"""
         try:
             self.socket.close()
             print("Disconnected from server")
@@ -69,7 +81,7 @@ class DataClient:
             print(f"Error disconnecting: {e}")
             
     def start_interactive(self):
-        """Start interactive client session"""
+        """شروع جلسه تعاملی"""
         if not self.connect():
             return
             

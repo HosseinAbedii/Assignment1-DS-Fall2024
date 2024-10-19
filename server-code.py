@@ -1,3 +1,4 @@
+# server-code.py
 import socket
 import threading
 import json
@@ -16,37 +17,36 @@ class DataDistributionServer:
         self.lock = threading.Lock()
         
     def load_data(self, filename: str):
-        """Load and parse CSV data"""
-        try:
-            with open(filename, 'r', encoding='utf-8') as file:
-                csv_reader = csv.DictReader(file)
-                self.available_data = list(csv_reader)
-                print(f"Loaded {len(self.available_data)} records from {filename}")
-        except Exception as e:
-            print(f"Error loading data: {e}")
-            self.available_data = []
-            
-    def send_json(self, socket: socket.socket, data: dict):
-        """Send JSON data with length prefix"""
+        """بارگذاری داده از فایل CSV"""
+        with open(filename, 'r') as file:
+            csv_reader = csv.DictReader(file)
+            self.available_data = list(csv_reader)
+            print(f"Loaded {len(self.available_data)} records from {filename}")
+
+    def send_data(self, client_socket: socket.socket, data: dict):
+        """ارسال داده به صورت امن"""
         try:
             json_data = json.dumps(data)
-            socket.sendall(json_data.encode())
+            message = json_data.encode()
+            total_sent = 0
+            while total_sent < len(message):
+                sent = client_socket.send(message[total_sent:])
+                if sent == 0:
+                    raise RuntimeError("socket connection broken")
+                total_sent += sent
         except Exception as e:
             print(f"Error sending data: {e}")
-            raise
             
     def distribute_data(self, client_id: str) -> List[Dict]:
-        """Randomly distribute available data to a client"""
+        """توزیع داده‌های موجود به کلاینت"""
         with self.lock:
             if not self.available_data:
                 return []
                 
-            # Randomly select ~1/n of remaining records where n is number of active clients
             n_records = max(1, len(self.available_data) // (len(self.clients) + 1))
             selected_indices = random.sample(range(len(self.available_data)), n_records)
             selected_data = [self.available_data[i] for i in sorted(selected_indices, reverse=True)]
             
-            # Remove selected data from available pool
             for i in sorted(selected_indices, reverse=True):
                 self.available_data.pop(i)
                 
@@ -54,7 +54,7 @@ class DataDistributionServer:
             return selected_data
             
     def redistribute_data(self, disconnected_client_id: str):
-        """Redistribute data from disconnected client to other clients"""
+        """توزیع مجدد داده‌های کلاینت قطع شده"""
         with self.lock:
             if disconnected_client_id not in self.client_data:
                 return
@@ -63,9 +63,7 @@ class DataDistributionServer:
             self.available_data.extend(self.client_data[disconnected_client_id])
             del self.client_data[disconnected_client_id]
             
-            # Redistribute to remaining clients
             if self.clients:
-                records_per_client = len(self.available_data) // len(self.clients)
                 for client_id in self.clients:
                     new_data = self.distribute_data(client_id)
                     if new_data:
@@ -73,10 +71,10 @@ class DataDistributionServer:
                             'type': 'data_update',
                             'data': new_data
                         }
-                        self.send_json(self.clients[client_id], response)
+                        self.send_data(self.clients[client_id], response)
                         
     def handle_client(self, client_socket: socket.socket, client_id: str):
-        """Handle individual client connections"""
+        """مدیریت اتصال کلاینت"""
         print(f"New client connected: {client_id}")
         
         try:
@@ -93,7 +91,7 @@ class DataDistributionServer:
                         'type': 'data_response',
                         'data': client_data
                     }
-                    self.send_json(client_socket, response)
+                    self.send_data(client_socket, response)
                     
                 elif request['type'] == 'get_id_locations':
                     id_locations = {}
@@ -104,7 +102,7 @@ class DataDistributionServer:
                         'type': 'id_locations_response',
                         'data': id_locations
                     }
-                    self.send_json(client_socket, response)
+                    self.send_data(client_socket, response)
                     
         except Exception as e:
             print(f"Error handling client {client_id}: {e}")
@@ -116,7 +114,7 @@ class DataDistributionServer:
                     self.redistribute_data(client_id)
                     
     def start(self):
-        """Start the server"""
+        """راه‌اندازی سرور"""
         self.server_socket.bind((self.host, self.port))
         self.server_socket.listen(5)
         print(f"Server listening on {self.host}:{self.port}")
