@@ -18,10 +18,16 @@ class DataDistributionServer:
         
     def load_data(self, filename: str):
         """بارگذاری داده از فایل CSV"""
-        with open(filename, 'r') as file:
-            csv_reader = csv.DictReader(file)
-            self.available_data = list(csv_reader)
-            print(f"Loaded {len(self.available_data)} records from {filename}")
+        try:
+            with open(filename, 'r', encoding='utf-8') as file:
+                csv_reader = csv.DictReader(file)
+                self.available_data = list(csv_reader)
+                print(f"Loaded {len(self.available_data)} records from {filename}")
+                if self.available_data:
+                    print("Available columns:", list(self.available_data[0].keys()))
+        except Exception as e:
+            print(f"Error loading data: {e}")
+            self.available_data = []
 
     def send_data(self, client_socket: socket.socket, data: dict):
         """ارسال داده به صورت امن"""
@@ -44,7 +50,7 @@ class DataDistributionServer:
                 return []
                 
             n_records = max(1, len(self.available_data) // (len(self.clients) + 1))
-            selected_indices = random.sample(range(len(self.available_data)), n_records)
+            selected_indices = random.sample(range(len(self.available_data)), min(n_records, len(self.available_data)))
             selected_data = [self.available_data[i] for i in sorted(selected_indices, reverse=True)]
             
             for i in sorted(selected_indices, reverse=True):
@@ -95,9 +101,11 @@ class DataDistributionServer:
                     
                 elif request['type'] == 'get_id_locations':
                     id_locations = {}
-                    for cid, data in self.client_data.items():
-                        for record in data:
-                            id_locations[record['id']] = cid
+                    # استفاده از اولین ستون به عنوان شناسه
+                    for cid, data_list in self.client_data.items():
+                        for record in data_list:
+                            first_key = next(iter(record))
+                            id_locations[record[first_key]] = cid
                     response = {
                         'type': 'id_locations_response',
                         'data': id_locations

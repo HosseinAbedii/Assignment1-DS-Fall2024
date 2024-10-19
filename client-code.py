@@ -48,13 +48,16 @@ class DataClient:
                     print("No data available")
                 else:
                     for record in self.data:
-                        print(f"ID: {record['id']}, Name: {record['firstname']} {record['lastname']}, "
-                              f"Email: {record['email']}, City: {record['City']}")
+                        # نمایش تمام فیلدهای موجود در رکورد
+                        print("\nRecord:")
+                        for key, value in record.items():
+                            print(f"{key}: {value}")
+                        print("-" * 50)
         except Exception as e:
             print(f"Error requesting data: {e}")
             
     def request_id_locations(self):
-        """درخواست موقعیت شناسه‌ها"""
+        """درخواست موقعیت رکوردها"""
         try:
             request = {
                 'type': 'get_id_locations'
@@ -63,14 +66,14 @@ class DataClient:
             
             response = json.loads(self.receive_all())
             if response['type'] == 'id_locations_response':
-                print("\nID Locations:")
+                print("\nRecord Locations:")
                 if not response['data']:
-                    print("No IDs currently allocated")
+                    print("No records currently allocated")
                 else:
-                    for id_, client in response['data'].items():
-                        print(f"ID {id_} is assigned to {client}")
+                    for record_id, client in response['data'].items():
+                        print(f"Record {record_id} is assigned to {client}")
         except Exception as e:
-            print(f"Error requesting ID locations: {e}")
+            print(f"Error requesting record locations: {e}")
             
     def disconnect(self):
         """قطع اتصال از سرور"""
@@ -88,7 +91,7 @@ class DataClient:
         while True:
             print("\nOptions:")
             print("1. Request data")
-            print("2. Show ID locations")
+            print("2. Show record locations")
             print("3. Disconnect")
             
             try:
